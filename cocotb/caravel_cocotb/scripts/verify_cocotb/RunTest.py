@@ -25,13 +25,13 @@ class RunTest:
 
     def docker_command_str(
         self,
-        docker_image="efabless/dv:cocotb",
+        docker_image="chipfoundry/dv:cocotb",
         docker_dir="",
         env_vars="",
         addtional_switchs="",
         command="",
     ):
-        command = f"docker run {' --init -it --sig-proxy=true ' if not self.args.CI else ' ' } -u $(id -u $USER):$(id -g $USER) {addtional_switchs} {env_vars} {docker_dir} {docker_image} sh -ec '{command}'"
+        command = f"docker run {' --init -it --sig-proxy=true ' if not self.args.CI else ' '} -u $(id -u $USER):$(id -g $USER) {addtional_switchs} {env_vars} {docker_dir} {docker_image} sh -ec '{command}'"
         return command
 
     def hex_riscv_command_gen(self):
@@ -45,9 +45,7 @@ class RunTest:
         LINKER_SCRIPT = f"-Wl,-Bstatic,-T,{self.test.linker_script_file},--strip-debug "
         CPUFLAGS = "-O2 -g -march=rv32i_zicsr -mabi=ilp32 -D__vexriscv__ -ffreestanding -nostdlib"
         # CPUFLAGS = "-O2 -g -march=rv32imc_zicsr -mabi=ilp32 -D__vexriscv__ -ffreestanding -nostdlib"
-        includes = [
-            f"-I{ip}" for ip in self.get_ips_fw()
-        ] + [
+        includes = [f"-I{ip}" for ip in self.get_ips_fw()] + [
             f"-I{self.paths.FIRMWARE_PATH}",
             f"-I{self.paths.FIRMWARE_PATH}/APIs",
             f"-I{self.paths.USER_PROJECT_ROOT}/verilog/dv/cocotb",
@@ -100,7 +98,7 @@ class RunTest:
             + f"-v {self.paths.USER_PROJECT_ROOT}:{self.paths.USER_PROJECT_ROOT}"
         )
         docker_command = self.docker_command_str(
-            docker_image="efabless/dv:cocotb", docker_dir=docker_dir, command=command
+            docker_image="chipfoundry/dv:cocotb", docker_dir=docker_dir, command=command
         )
         # don't run with docker with arm
         cmd = command if self.args.cpu_type == "ARM" else docker_command
@@ -114,7 +112,7 @@ class RunTest:
         if hex_gen_state != 0:
             # open(self.test.firmware_log, "w").write(stdout)
             raise RuntimeError(
-                f"{bcolors.FAIL}Error:{bcolors.ENDC} Fail to compile the C code for more info refer to {bcolors.OKCYAN }{self.test.hex_log}{bcolors.ENDC } "
+                f"{bcolors.FAIL}Error:{bcolors.ENDC} Fail to compile the C code for more info refer to {bcolors.OKCYAN}{self.test.hex_log}{bcolors.ENDC} "
             )
             self.firmware_log.write("Error: when generating hex")
             self.firmware_log.close()
@@ -136,7 +134,11 @@ class RunTest:
             if os.path.isdir(f"{self.paths.USER_PROJECT_ROOT}/ip/{file}"):
                 for f in os.listdir(f"{self.paths.USER_PROJECT_ROOT}/ip/{file}"):
                     if f == "fw":
-                        fw_list.append(os.path.realpath(f"{self.paths.USER_PROJECT_ROOT}/ip/{file}/{f}"))
+                        fw_list.append(
+                            os.path.realpath(
+                                f"{self.paths.USER_PROJECT_ROOT}/ip/{file}/{f}"
+                            )
+                        )
         # send it as string
         # ips_fw = f"{flag_type}" + f" {flag_type}".join(fw_list)
         return fw_list
@@ -177,13 +179,20 @@ class RunTest:
             print(f"{bcolors.OKCYAN}Compiling as compile flag is set{bcolors.ENDC}")
             self.iverilog_compile()
             self.write_hash(self.test.netlist)
-        elif not self.is_same_hash(self.test.netlist) and f"{self.test.compilation_dir}/sim.vvp" not in RunTest.COMPILE_LOCK:
+        elif (
+            not self.is_same_hash(self.test.netlist)
+            and f"{self.test.compilation_dir}/sim.vvp" not in RunTest.COMPILE_LOCK
+        ):
             print(f"{bcolors.OKCYAN}Compiling since netlist has changed{bcolors.ENDC}")
             self.iverilog_compile()
         else:
             if f"{self.test.compilation_dir}/sim.vvp" not in RunTest.COMPILE_LOCK:
-                print(f"{bcolors.OKGREEN}Skipping compilation as netlist has not changed{bcolors.ENDC}")
-        RunTest.COMPILE_LOCK.add(f"{self.test.compilation_dir}/sim.vvp")  # locked means if it is copiled for the first time then it will not be compiled again even if netlist changes
+                print(
+                    f"{bcolors.OKGREEN}Skipping compilation as netlist has not changed{bcolors.ENDC}"
+                )
+        RunTest.COMPILE_LOCK.add(
+            f"{self.test.compilation_dir}/sim.vvp"
+        )  # locked means if it is copiled for the first time then it will not be compiled again even if netlist changes
         if not self.args.compile_only:
             self.iverilog_run()
 
@@ -214,7 +223,7 @@ class RunTest:
     def iverilog_run(self):
         defines = GetDefines(self.test.includes_file)
         seed = "" if self.args.seed is None else f"RANDOM_SEED={self.args.seed}"
-        run_command = f"cd {self.test.test_dir} && TESTCASE={self.test.name} MODULE=module_trail {seed} vvp -M $(cocotb-config --prefix)/cocotb/libs -m libcocotbvpi_icarus {self.test.compilation_dir}/sim.vvp +{ ' +'.join(self.test.macros) } {' '.join([f'+{k}={v}' if v != ''else f'+{k}' for k, v in defines.defines.items()])}"
+        run_command = f"cd {self.test.test_dir} && TESTCASE={self.test.name} MODULE=module_trail {seed} vvp -M $(cocotb-config --prefix)/cocotb/libs -m libcocotbvpi_icarus {self.test.compilation_dir}/sim.vvp +{' +'.join(self.test.macros)} {' '.join([f'+{k}={v}' if v != '' else f'+{k}' for k, v in defines.defines.items()])}"
         docker_run_command = self._iverilog_docker_command_str(run_command)
         self.run_command_write_to_file(
             docker_run_command if not self.args.no_docker else run_command,
@@ -234,13 +243,18 @@ class RunTest:
         docker_dir += (
             f"-v {self.paths.USER_PROJECT_ROOT}:{self.paths.USER_PROJECT_ROOT}"
         )
-        docker_dir += " ".join([f' -v {link}:{link} ' for link in self.find_symbolic_links(self.paths.USER_PROJECT_ROOT)])
+        docker_dir += " ".join(
+            [
+                f" -v {link}:{link} "
+                for link in self.find_symbolic_links(self.paths.USER_PROJECT_ROOT)
+            ]
+        )
         print(docker_dir)
         if os.path.exists("/mnt/scratch/"):
             docker_dir += " -v /mnt/scratch/cocotb_runs/:/mnt/scratch/cocotb_runs/ "
         display = " -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix -v $HOME/.Xauthority:/.Xauthority --network host --security-opt seccomp=unconfined "
         command = self.docker_command_str(
-            docker_image="efabless/dv:cocotb",
+            docker_image="chipfoundry/dv:cocotb",
             docker_dir=docker_dir,
             env_vars=env_vars,
             addtional_switchs=display,
@@ -273,13 +287,22 @@ class RunTest:
             print(f"{bcolors.OKCYAN}Compiling as compile flag is set{bcolors.ENDC}")
             self.vcs_compile()
             self.write_hash(self.test.netlist)
-        elif not self.is_same_hash(self.test.netlist) and f"{self.test.compilation_dir}/simv" not in RunTest.COMPILE_LOCK:
-            print(f"{bcolors.OKCYAN}Compiling since netlist has has changed{bcolors.ENDC}")
+        elif (
+            not self.is_same_hash(self.test.netlist)
+            and f"{self.test.compilation_dir}/simv" not in RunTest.COMPILE_LOCK
+        ):
+            print(
+                f"{bcolors.OKCYAN}Compiling since netlist has has changed{bcolors.ENDC}"
+            )
             self.vcs_compile()
         else:
             if f"{self.test.compilation_dir}/simv" not in RunTest.COMPILE_LOCK:
-                print(f"{bcolors.OKCYAN}Skipping compilation as netlist has not changed{bcolors.ENDC}")
-        RunTest.COMPILE_LOCK.add(f"{self.test.compilation_dir}/simv")  # locked means if it is copiled for the first time then it will not be compiled again even if netlist changes
+                print(
+                    f"{bcolors.OKCYAN}Skipping compilation as netlist has not changed{bcolors.ENDC}"
+                )
+        RunTest.COMPILE_LOCK.add(
+            f"{self.test.compilation_dir}/simv"
+        )  # locked means if it is copiled for the first time then it will not be compiled again even if netlist changes
         if not self.args.compile_only:
             self.vcs_run()
 
@@ -317,7 +340,7 @@ class RunTest:
         defines = GetDefines(self.test.includes_file)
         if self.args.seed is not None:
             os.environ["RANDOM_SEED"] = self.args.seed
-        run_sim = f"cd {self.test.test_dir}; {self.test.compilation_dir}/simv +vcs+dumpvars+all {self.vcs_coverage_command} -cm_name {self.test.name} +{ ' +'.join(self.test.macros)} {' '.join([f'+{k}={v}' if v != ''else f'+{k}' for k, v in defines.defines.items()])}"
+        run_sim = f"cd {self.test.test_dir}; {self.test.compilation_dir}/simv +vcs+dumpvars+all {self.vcs_coverage_command} -cm_name {self.test.name} +{' +'.join(self.test.macros)} {' '.join([f'+{k}={v}' if v != '' else f'+{k}' for k, v in defines.defines.items()])}"
         self.run_command_write_to_file(
             run_sim,
             None if self.args.verbosity == "quiet" else self.test.test_log2,
@@ -404,6 +427,7 @@ class RunTest:
         with open(self.test.hash_log, "w") as f:
             f.write(new_hash)
         return new_hash
+
 
 class bcolors:
     HEADER = "\033[95m"
