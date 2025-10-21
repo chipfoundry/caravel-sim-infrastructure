@@ -3,15 +3,15 @@ import ruamel.yaml
 
 yaml_str = """\
 #eg CARAVEL_ROOT: "/usr/Desktop/caravel_project/caravel/"
-#like repo https://github.com/efabless/caravel
+#like repo https://github.com/chipfoundry/caravel
 CARAVEL_ROOT: "/home/rady/caravel/caravel_orginal/caravel/"
 
 #eg MCW_ROOT: "/usr/Desktop/caravel_project/caravel_mgmt_soc_litex/"
-#like repo https://github.com/efabless/caravel_mgmt_soc_litex
+#like repo https://github.com/chipfoundry/caravel_mgmt_soc_litex
 MCW_ROOT: '/home/rady/caravel/caravel_orginal/caravel_mgmt_soc_litex/'
 
 #eg USER_PROJECT_ROOT: "/usr/Desktop/caravel_project/caravel_user_project/"
-#like repo https://github.com/efabless/caravel_user_project
+#like repo https://github.com/chipfoundry/caravel_user_project
 
 USER_PROJECT_ROOT: "/home/rady/caravel/swift/caravel_user_project/"
 

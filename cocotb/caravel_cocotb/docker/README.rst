@@ -2,7 +2,7 @@
 Dockerfile
 ===========
 
-This Dockerfile provides instructions for building the `efabless/dv:cocotb` Docker image. This image includes various packages and tools for caravel Verification with vcs.
+This Dockerfile provides instructions for building the `chipfoundry/dv:cocotb` Docker image. This image includes various packages and tools for caravel Verification with vcs.
 
 Docker Image Contents
 ---------------------
@@ -33,9 +33,9 @@ The image installs the following Python packages using pip:
 Pulling the Docker Image
 ------------------------
 
-You can pull the `efabless/dv:cocotb` Docker image from Docker Hub using the following command::
+You can pull the `chipfoundry/dv:cocotb` Docker image from Docker Hub using the following command::
 
-    docker pull efabless/dv:cocotb
+    docker pull chipfoundry/dv:cocotb
 
 Building the Docker Image
 --------------------------
@@ -44,11 +44,11 @@ Building the Docker Image
 
     Navigate to this directory and build the Docker image using the following command::
 
-         docker build -t efabless/dv:cocotb -f DockerFile . 
+         docker build -t chipfoundry/dv:cocotb -f DockerFile . 
 
     To build diffrent image extend the image name with new tag::
 
-        docker build -t efabless/dv:cocotb:<new_tag> . 
+        docker build -t chipfoundry/dv:cocotb:<new_tag> . 
 
 
 
@@ -63,4 +63,4 @@ Pushing the Docker Image (if you have access)
 
 2. Push the image to Docker Hub::
 
-    push efabless/dv:cocotb
+    push chipfoundry/dv:cocotb

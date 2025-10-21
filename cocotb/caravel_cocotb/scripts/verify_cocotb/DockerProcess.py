@@ -68,8 +68,8 @@ class DockerProcess:
                 requirements = file.readlines()
             requirements = [requirement.strip() for requirement in requirements]
 
-            f.write("# Use the efabless/dv:cocotb base image\n")
-            f.write("FROM efabless/dv:cocotb\n")
+            f.write("# Use the chipfoundry/dv:cocotb base image\n")
+            f.write("FROM chipfoundry/dv:cocotb\n")
             f.write("\n")
             # f.write("# Copy requirements.txt into the container\n")
             # f.write("WORKDIR /app\n")
