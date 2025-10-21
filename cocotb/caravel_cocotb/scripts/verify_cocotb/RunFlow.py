@@ -33,7 +33,7 @@ class RunFLow:
         self.set_args(design_info)
         self.set_config_script(design_info)
         DockerProcess(
-            "efabless/dv:cocotb",
+            "chipfoundry/dv:cocotb",
             self.paths.USER_PROJECT_ROOT,
             f"{self.paths.SIM_PATH}/{self.args.tag}",
         ).run()
@@ -67,7 +67,7 @@ class RunFLow:
 
     def set_tag(self):
         if self.args.tag is None:
-            self.args.tag = f'run_{datetime.now().strftime("%d_%b_%H_%M_%S_%f")[:-4]}'
+            self.args.tag = f"run_{datetime.now().strftime('%d_%b_%H_%M_%S_%f')[:-4]}"
         Path(f"{self.paths.SIM_PATH}").mkdir(parents=True, exist_ok=True)
         # check if scratch disk exists
         if os.path.exists("/mnt/scratch/") and not self.args.no_scratch:
@@ -104,7 +104,7 @@ class RunFLow:
                 GitRepoChecker(
                     design_info["USER_PROJECT_ROOT"]
                 )  # check repo synced with last commit
-        if not os.path.exists(f'{design_info["PDK_ROOT"]}/{design_info["PDK"]}'):
+        if not os.path.exists(f"{design_info['PDK_ROOT']}/{design_info['PDK']}"):
             raise NotADirectoryError(
                 f"PDK_ROOT/PDK is not a directory PDK_ROOT:{design_info['PDK_ROOT']}/{design_info['PDK']}"
             )
@@ -239,7 +239,7 @@ class RunFLow:
                 dict(
                     CARAVEL_ROOT=self.paths.CARAVEL_ROOT,
                     MCW_ROOT=self.paths.MCW_ROOT,
-                    PDK_ROOT=f'{self.paths.PDK_ROOT}/{design_info["PDK"]}',
+                    PDK_ROOT=f"{self.paths.PDK_ROOT}/{design_info['PDK']}",
                 )
             )
         elif "FRIGATE_ROOT" in self.paths._fields:
@@ -247,7 +247,7 @@ class RunFLow:
                 dict(
                     FRIGATE_ROOT=self.paths.FRIGATE_ROOT,
                     MCW_ROOT=self.paths.MCW_ROOT,
-                    PDK_ROOT=f'{self.paths.PDK_ROOT}/{design_info["PDK"]}',
+                    PDK_ROOT=f"{self.paths.PDK_ROOT}/{design_info['PDK']}",
                 )
             )
         with open(new_config_path, "w") as file:
@@ -292,7 +292,7 @@ class CocotbArgs:
         progress=False,
         compile_only=False,
         no_scratch=False,
-        no_gen_defaults=False
+        no_gen_defaults=False,
     ) -> None:
         self.test = test
         self.sim = sim

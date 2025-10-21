@@ -44,7 +44,7 @@ in
 
     meta = {
       description = pyproject_toml.tool.poetry.description;
-      homepage = "https://github.com/efabless/caravel-sim-infrastructure";
+      homepage = "https://github.com/chipfoundry/caravel-sim-infrastructure";
       license = lib.licenses.asl20;
       platforms = ["x86_64-linux"];
     };
