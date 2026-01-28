@@ -47,9 +47,13 @@ class RunRegression:
         paths_macros = [
             f'RUN_PATH=\\"{self.paths.RUN_PATH}\\"',
             f'TAG=\\"{self.args.tag}\\"',
-            f'MCW_ROOT=\\"{self.paths.MCW_ROOT}\\"',
             f'USER_PROJECT_ROOT=\\"{self.paths.USER_PROJECT_ROOT}\\"',
         ]
+        
+        # Add MCW_ROOT only for non-OpenFrame mode
+        if not self.args.openframe and "MCW_ROOT" in self.paths._fields:
+            paths_macros.append(f'MCW_ROOT=\\"{self.paths.MCW_ROOT}\\"')
+        
         if "CARAVEL_ROOT" in self.paths._fields:
             paths_macros += [f'CARAVEL_ROOT=\\"{self.paths.CARAVEL_ROOT}\\"']
         elif "FRIGATE_ROOT" in self.paths._fields:
@@ -59,8 +63,13 @@ class RunRegression:
         if self.args.pdk != "gf180":
             simulation_macros.append("FUNCTIONAL")
 
-        if self.args.caravan:
-            simulation_macros.append("CARAVAN")
+        # OpenFrame-specific macros
+        if self.args.openframe:
+            simulation_macros.append("OPENFRAME")
+        else:
+            if self.args.caravan:
+                simulation_macros.append("CARAVAN")
+                
         # don't dumb waves if tests are more than 10
         if not self.args.no_wave and len(self.tests) < 10:
             simulation_macros.append("WAVE_GEN")
@@ -75,9 +84,11 @@ class RunRegression:
 
         simulation_macros.append(self.args.pdk)
 
-        simulation_macros.extend([f"CPU_TYPE_{self.args.cpu_type}"])
-        if self.args.cpu_type == "ARM":
-            simulation_macros.append("AHB")
+        # CPU type macros only for non-OpenFrame mode
+        if not self.args.openframe and self.args.cpu_type is not None:
+            simulation_macros.extend([f"CPU_TYPE_{self.args.cpu_type}"])
+            if self.args.cpu_type == "ARM":
+                simulation_macros.append("AHB")
 
         self.args.macros += simulation_macros + paths_macros
 
@@ -353,28 +364,30 @@ class RunRegression:
             ).stdout
         )
 
-        f.write(f"\n\n{'#'*4} Caravel Managment repo info {'#'*4}\n")
-        url = "https://github.com/" + f"{run(f'cd {self.paths.MCW_ROOT};git ls-remote --get-url', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout}".replace(
-            "git@github.com:", ""
-        ).replace(
-            ".git", ""
-        )
-        repo = f"Repo: {run(f'cd {self.paths.MCW_ROOT};basename -s .git `git config --get remote.origin.url`', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout} ({url})".replace(
-            "\n", " "
-        )
-        f.write(f"{repo}\n")
-        f.write(
-            f"Branch name: {run(f'cd {self.paths.MCW_ROOT};git symbolic-ref --short HEAD', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout}"
-        )
-        f.write(
-            run(
-                f"cd {self.paths.MCW_ROOT};git show --quiet HEAD",
-                stdout=PIPE,
-                stderr=PIPE,
-                universal_newlines=True,
-                shell=True,
-            ).stdout
-        )
+        # Skip MCW_ROOT for OpenFrame mode
+        if not self.args.openframe and "MCW_ROOT" in self.paths._fields:
+            f.write(f"\n\n{'#'*4} Caravel Managment repo info {'#'*4}\n")
+            url = "https://github.com/" + f"{run(f'cd {self.paths.MCW_ROOT};git ls-remote --get-url', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout}".replace(
+                "git@github.com:", ""
+            ).replace(
+                ".git", ""
+            )
+            repo = f"Repo: {run(f'cd {self.paths.MCW_ROOT};basename -s .git `git config --get remote.origin.url`', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout} ({url})".replace(
+                "\n", " "
+            )
+            f.write(f"{repo}\n")
+            f.write(
+                f"Branch name: {run(f'cd {self.paths.MCW_ROOT};git symbolic-ref --short HEAD', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout}"
+            )
+            f.write(
+                run(
+                    f"cd {self.paths.MCW_ROOT};git show --quiet HEAD",
+                    stdout=PIPE,
+                    stderr=PIPE,
+                    universal_newlines=True,
+                    shell=True,
+                ).stdout
+            )
 
         f.write(f"\n\n{'#'*4} User repo info {'#'*4}\n")
         url = "https://github.com/" + f"{run(f'cd {self.paths.USER_PROJECT_ROOT};git ls-remote --get-url', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout}".replace(

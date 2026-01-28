@@ -18,7 +18,10 @@ class RunTest:
         self.logger = logger
 
     def run_test(self):
-        if self.hex_generate() == "hex_generated":  # run test only if hex is generated
+        # OpenFrame mode: no firmware/hex generation needed
+        if self.args.openframe:
+            self.runTest()
+        elif self.hex_generate() == "hex_generated":  # run test only if hex is generated
             self.runTest()
         if not self.args.compile_only:
             self.test.end_of_test()
@@ -92,7 +95,10 @@ class RunTest:
         else:
             command = self.hex_riscv_command_gen()
 
-        docker_dir = f"-v {self.hex_dir}:{self.hex_dir} -v {self.paths.RUN_PATH}:{self.paths.RUN_PATH} -v {self.paths.CARAVEL_ROOT}:{self.paths.CARAVEL_ROOT} -v {self.paths.MCW_ROOT}:{self.paths.MCW_ROOT} -v {self.test.test_dir}:{self.test.test_dir} {' '.join([f'-v {link}:{link} ' for link in self.get_ips_fw()])} "
+        docker_dir = f"-v {self.hex_dir}:{self.hex_dir} -v {self.paths.RUN_PATH}:{self.paths.RUN_PATH} -v {self.paths.CARAVEL_ROOT}:{self.paths.CARAVEL_ROOT} "
+        if "MCW_ROOT" in self.paths._fields:
+            docker_dir += f"-v {self.paths.MCW_ROOT}:{self.paths.MCW_ROOT} "
+        docker_dir += f"-v {self.test.test_dir}:{self.test.test_dir} {' '.join([f'-v {link}:{link} ' for link in self.get_ips_fw()])} "
         docker_dir = (
             docker_dir
             + f"-v {self.paths.USER_PROJECT_ROOT}:{self.paths.USER_PROJECT_ROOT}"
@@ -207,10 +213,13 @@ class RunTest:
         if os.path.isfile(f"{self.test.compilation_dir}/sim.vvp"):
             os.remove(f"{self.test.compilation_dir}/sim.vvp")
         macros = " -D" + " -D".join(self.test.macros)
+        # Top-level module is always caravel_top - the OPENFRAME macro controls which design is instantiated
+        top_module = "caravel_top"
+        toplevel_file = f"{self.paths.CARAVEL_VERILOG_PATH}/rtl/toplevel_cocotb.v"
         compile_command = (
             f"cd {self.test.compilation_dir} &&"
-            f"iverilog -g2012 -Ttyp {macros} {self.iverilog_dirs} -o {self.test.compilation_dir}/sim.vvp -s caravel_top"
-            f" {self.paths.CARAVEL_VERILOG_PATH}/rtl/toplevel_cocotb.v"
+            f"iverilog -g2012 -Ttyp {macros} {self.iverilog_dirs} -o {self.test.compilation_dir}/sim.vvp -s {top_module}"
+            f" {toplevel_file}"
         )
         docker_compilation_command = self._iverilog_docker_command_str(compile_command)
         self.run_command_write_to_file(
@@ -234,12 +243,20 @@ class RunTest:
 
     def _iverilog_docker_command_str(self, command=""):
         """the docker command without the command that would run"""
-        env_vars = f"-e COCOTB_RESULTS_FILE={os.getenv('COCOTB_RESULTS_FILE')} -e CARAVEL_PATH={self.paths.CARAVEL_PATH} -e CARAVEL_VERILOG_PATH={self.paths.CARAVEL_VERILOG_PATH} -e VERILOG_PATH={self.paths.VERILOG_PATH} -e PDK_ROOT={self.paths.PDK_ROOT} -e PDK={self.paths.PDK} -e USER_PROJECT_VERILOG={self.paths.USER_PROJECT_ROOT}/verilog"
+        # Build environment variables - handle OpenFrame (no VERILOG_PATH from MCW)
+        if self.args.openframe:
+            env_vars = f"-e COCOTB_RESULTS_FILE={os.getenv('COCOTB_RESULTS_FILE')} -e CARAVEL_PATH={self.paths.CARAVEL_PATH} -e CARAVEL_VERILOG_PATH={self.paths.CARAVEL_VERILOG_PATH} -e PDK_ROOT={self.paths.PDK_ROOT} -e PDK={self.paths.PDK} -e USER_PROJECT_VERILOG={self.paths.USER_PROJECT_ROOT}/verilog -e OPENFRAME=1"
+        else:
+            env_vars = f"-e COCOTB_RESULTS_FILE={os.getenv('COCOTB_RESULTS_FILE')} -e CARAVEL_PATH={self.paths.CARAVEL_PATH} -e CARAVEL_VERILOG_PATH={self.paths.CARAVEL_VERILOG_PATH} -e VERILOG_PATH={self.paths.VERILOG_PATH} -e PDK_ROOT={self.paths.PDK_ROOT} -e PDK={self.paths.PDK} -e USER_PROJECT_VERILOG={self.paths.USER_PROJECT_ROOT}/verilog"
         local_caravel_cocotb_path = caravel_cocotb.__file__.replace("__init__.py", "")
         docker_caravel_cocotb_path = (
-            "/usr/local/lib/python3.8/dist-packages/caravel_cocotb/"
+            "/usr/local/lib/python3.10/dist-packages/caravel_cocotb/"
         )
-        docker_dir = f"-v {self.paths.RUN_PATH}:{self.paths.RUN_PATH} -v {self.paths.CARAVEL_ROOT}:{self.paths.CARAVEL_ROOT} -v {self.paths.MCW_ROOT}:{self.paths.MCW_ROOT} -v {self.paths.PDK_ROOT}:{self.paths.PDK_ROOT} -v {local_caravel_cocotb_path}:{docker_caravel_cocotb_path} "
+        # Build volume mounts - skip MCW_ROOT for OpenFrame
+        docker_dir = f"-v {self.paths.RUN_PATH}:{self.paths.RUN_PATH} -v {self.paths.CARAVEL_ROOT}:{self.paths.CARAVEL_ROOT} "
+        if not self.args.openframe and "MCW_ROOT" in self.paths._fields:
+            docker_dir += f"-v {self.paths.MCW_ROOT}:{self.paths.MCW_ROOT} "
+        docker_dir += f"-v {self.paths.PDK_ROOT}:{self.paths.PDK_ROOT} -v {local_caravel_cocotb_path}:{docker_caravel_cocotb_path} "
         docker_dir += (
             f"-v {self.paths.USER_PROJECT_ROOT}:{self.paths.USER_PROJECT_ROOT}"
         )
@@ -319,7 +336,10 @@ class RunTest:
         if os.path.isfile(f"{self.test.compilation_dir}/simv"):
             os.remove(f"{self.test.compilation_dir}/simv")
         macros = " +define+" + " +define+".join(self.test.macros)
-        vlogan_cmd = f"cd {self.test.compilation_dir}; vlogan -full64 -sverilog +error+30 {self.paths.CARAVEL_VERILOG_PATH}/rtl/toplevel_cocotb.v {self.vcs_dirs}  {macros}   -l {self.test.compilation_dir}/analysis.log -o {self.test.compilation_dir} "
+        # Top-level module is always caravel_top - the OPENFRAME macro controls which design is instantiated
+        top_module = "caravel_top"
+        toplevel_file = f"{self.paths.CARAVEL_VERILOG_PATH}/rtl/toplevel_cocotb.v"
+        vlogan_cmd = f"cd {self.test.compilation_dir}; vlogan -full64 -sverilog +error+30 {toplevel_file} {self.vcs_dirs}  {macros}   -l {self.test.compilation_dir}/analysis.log -o {self.test.compilation_dir} "
         self.run_command_write_to_file(
             vlogan_cmd,
             self.test.compilation_log,
@@ -328,7 +348,7 @@ class RunTest:
         )
         lint = "+lint=all" if self.args.lint else ""
         ignored_errors = " -error=noZMMCM "
-        vcs_cmd = f"cd {self.test.compilation_dir};  vcs {lint} -negdelay {self.vcs_coverage_command} {ignored_errors} -debug_access+all +error+50 +vcs+loopreport+1000000 -diag=sdf:verbose +sdfverbose +neg_tchk -full64  -l {self.test.compilation_dir}/test_compilation.log  caravel_top -Mdir={self.test.compilation_dir}/csrc -o {self.test.compilation_dir}/simv +vpi -P pli.tab -load $(cocotb-config --lib-name-path vpi vcs)"
+        vcs_cmd = f"cd {self.test.compilation_dir};  vcs {lint} -negdelay {self.vcs_coverage_command} {ignored_errors} -debug_access+all +error+50 +vcs+loopreport+1000000 -diag=sdf:verbose +sdfverbose +neg_tchk -full64  -l {self.test.compilation_dir}/test_compilation.log  {top_module} -Mdir={self.test.compilation_dir}/csrc -o {self.test.compilation_dir}/simv +vpi -P pli.tab -load $(cocotb-config --lib-name-path vpi vcs)"
         self.run_command_write_to_file(
             vcs_cmd,
             self.test.compilation_log,
