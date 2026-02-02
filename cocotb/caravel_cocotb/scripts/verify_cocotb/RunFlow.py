@@ -9,6 +9,7 @@ import re
 import logging
 import random
 from caravel_cocotb.scripts.verify_cocotb.DockerProcess import DockerProcess
+from caravel_cocotb.scripts.verify_cocotb.logging_config import setup_logger, Colors
 
 
 def check_valid_mail_addr(address):
@@ -44,13 +45,9 @@ class RunFLow:
         RunRegression(self.args, self.paths, self.logger)
 
     def configure_logger(self):
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
-        formatter = logging.Formatter("%(message)s")
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
+        """Configure logger with clean formatting based on verbosity level."""
+        verbosity = getattr(self.args, 'verbosity', 'normal') or 'normal'
+        self.logger = setup_logger(__name__, verbosity=verbosity)
 
     def check_valid_args(self):
         if all(v is None for v in [self.args.test, self.args.testlist]):

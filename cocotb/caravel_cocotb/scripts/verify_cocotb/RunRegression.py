@@ -23,6 +23,9 @@ from rich.table import Table
 from rich.console import Console
 import glob
 import subprocess
+from caravel_cocotb.scripts.verify_cocotb.logging_config import (
+    Colors, print_test_header, print_test_result, print_summary_table
+)
 
 class RunRegression:
     def __init__(self, args, paths, logger) -> None:
@@ -206,8 +209,9 @@ class RunRegression:
                 self.run_all_tests()
         else:
             self.run_all_tests()
-            # Print the table in the top-left corner
-            Console().print(self.live_table(), justify="left")
+            # Print clean summary table
+            total_duration = '%.10s' % (datetime.now() - self.total_start_time)
+            print_summary_table(self.tests, total_duration)
 
         # for index, thread in enumerate(threads):
         #     thread.join()
@@ -250,6 +254,10 @@ class RunRegression:
                     TestDefaults(self.args, self.paths, self.test_run_function, self.tests, self.logger)
 
     def test_run_function(self, test):
+        # Print clean test header (except in quiet mode)
+        if self.args.verbosity != "quiet":
+            print_test_header(test.full_name, test.sim)
+        
         test.start_of_test()
         if not self.args.compile_only:
             self.update_run_log()
@@ -258,6 +266,15 @@ class RunRegression:
         if not self.args.compile_only:
             self.update_run_log()
             self.update_live_table()
+        
+        # Print clean test result (except in quiet mode)
+        if self.args.verbosity != "quiet" and not self.args.compile_only:
+            print_test_result(
+                test.full_name,
+                passed=(test.passed == "passed"),
+                duration=test.duration
+            )
+        
         if self.args.progress:
             self.logger.info(f"Total: {f'passed ({test.passed_count})':12} {f'failed ({test.failed_count})':12} {f'unknown ({test.unknown_count})':13} elapsed time ({('%.10s' % (datetime.now() - self.total_start_time))})")
 

@@ -108,7 +108,7 @@ class Test:
         return user_project.replace("\n", "")
 
     def start_of_test(self):
-        print(f"Start running test: {bcolors.OKBLUE  } {self.full_name} {bcolors.ENDC}")
+        # Note: Clean test header is now printed by test_run_function in RunRegression
         self.start_time_t = datetime.now()
         self.create_logs()
         self.create_module_trail()
@@ -132,20 +132,19 @@ class Test:
         Path(f"{self.test_dir}/{self.passed}").touch()
         if is_pass[1]:
             Test.passed_count += 1
-            print(
-                f"{bcolors.OKGREEN }Test: {self.sim}-{self.name} has passed{bcolors.ENDC}"
-            )
+            # Note: Clean result is printed by test_run_function in RunRegression
         else:
             Test.failed_count += 1
+            # Log error details to help user find the issue
             if not os.path.isfile(self.compilation_log):
                 pass
             elif os.path.isfile(self.test_log):
-                self.logger.info(
-                    f"{bcolors.FAIL }Fail{bcolors.ENDC}: Test {self.sim}-{self.name} has Failed for more info refer to {bcolors.OKCYAN }{self.test_log}{bcolors.ENDC}"
+                self.logger.error(
+                    f"Test {self.full_name} failed. See: {self.test_log}"
                 )
             else:
-                self.logger.info(
-                    f"{bcolors.FAIL }Error{bcolors.ENDC}: Fail to compile the verilog code for more info refer to {bcolors.OKCYAN }{self.compilation_log}{bcolors.ENDC}"
+                self.logger.error(
+                    f"Compilation failed. See: {self.compilation_log}"
                 )
 
         if self.args.lint:

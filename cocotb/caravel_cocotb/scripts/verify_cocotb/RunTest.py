@@ -6,6 +6,7 @@ import re
 import logging
 import caravel_cocotb
 import hashlib
+from caravel_cocotb.scripts.verify_cocotb.logging_config import OutputFilter, Colors
 
 
 class RunTest:
@@ -266,7 +267,6 @@ class RunTest:
                 for link in self.find_symbolic_links(self.paths.USER_PROJECT_ROOT)
             ]
         )
-        print(docker_dir)
         if os.path.exists("/mnt/scratch/"):
             docker_dir += " -v /mnt/scratch/cocotb_runs/:/mnt/scratch/cocotb_runs/ "
         display = " -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix -v $HOME/.Xauthority:/.Xauthority --network host --security-opt seccomp=unconfined "
@@ -375,44 +375,133 @@ class RunTest:
         raise RuntimeError(f"Test {name} doesn't exist or don't have a C file ")
 
     def run_command_write_to_file(self, cmd, file, logger, quiet=True):
-        """run command and write output to file return 0 if no error"""
+        """Run command and write output to file, return 0 if no error.
+        
+        Improvements:
+        - Filters out noisy output (docker volumes, platform warnings)
+        - Deduplicates progressive line output (truncated + full)
+        - Only shows important messages in normal mode
+        """
+        # Patterns to filter out from console (always log to file)
+        noise_patterns = [
+            re.compile(r'^-v\s+/'),  # Docker volume mounts
+            re.compile(r'docker\.io/'),  # Docker image refs
+            re.compile(r"What's next:"),
+            re.compile(r'docker scout'),
+            re.compile(r'View a summary of image'),
+            re.compile(r'platform.*does not match'),
+            re.compile(r'^\s*$'),  # Empty lines
+            re.compile(r'DeprecationWarning'),  # Python deprecation warnings
+            re.compile(r'RuntimeWarning'),  # Runtime warnings
+            re.compile(r'^\*+$'),  # Lines of just asterisks
+            re.compile(r'^\*\*\s'),  # Cocotb table lines starting with **
+            re.compile(r'^\s+\*\*'),  # Cocotb table continuation lines
+            re.compile(r'cocotb\.scheduler\.add'),  # Scheduler deprecation
+            re.compile(r'/usr/local/lib/python.*\.py:\d+:'),  # Python path warnings with line numbers
+            re.compile(r'^\s+cocotb\.(scheduler|log)'),  # Cocotb internal refs
+            re.compile(r'===WARNING===.*sky130'),  # SKY130 timing warnings
+            re.compile(r'^VCD info:'),  # VCD file info
+            re.compile(r'^\s+self\.'),  # Stack trace lines starting with self.
+            re.compile(r'^/opt/homebrew/'),  # Homebrew path warnings
+            re.compile(r'gpi_embed\.cpp'),  # GPI embed messages
+            re.compile(r'GpiCommon\.cpp'),  # GPI common messages
+            re.compile(r'in gpi_print_registered'),  # GPI registration
+            re.compile(r'in set_program_name_in_venv'),  # venv detection
+            re.compile(r'VPI registered'),  # VPI registration
+            re.compile(r'pytest not found'),  # Pytest suggestion
+        ]
+        
+        # Set up file logging separately
+        log_file = None
         if file is not None:
-            logger_file = logging.getLogger(file)
-            logger_file.setLevel(logging.INFO)
-            # Configure file handler for the logger
-            file_handler = logging.FileHandler(file)
-            file_handler.setLevel(logging.INFO)
-            file_formatter = logging.Formatter("%(message)s")
-            file_handler.setFormatter(file_formatter)
-            logger_file.addHandler(file_handler)
-            f = open(file, "a")
-            f.write("command:")
-            f.write(os.path.expandvars(cmd) + "\n\n")
-            f.close()
+            log_file = open(file, "a")
+            log_file.write("command:\n")
+            log_file.write(os.path.expandvars(cmd) + "\n\n")
+            log_file.write("-" * 60 + "\n")
+        
+        # Buffered deduplication: hold each line and only print when we see a different line
+        # This handles progressive output (truncated -> medium -> full)
+        # Key: only deduplicate when one line is a STRICT PREFIX of another
+        buffered_line = None
+        
+        def is_progressive_duplicate(line1, line2):
+            """Check if line1 is a truncated version of line2 (strict prefix)."""
+            if not line1 or not line2:
+                return False
+            # One must be a strict prefix of the other (progressive output)
+            # This is NOT the same as sharing a common prefix
+            shorter, longer = (line1, line2) if len(line1) < len(line2) else (line2, line1)
+            # The shorter line must be a prefix of the longer line
+            # And they must differ by at least a few characters (not just whitespace)
+            if longer.startswith(shorter) and len(longer) > len(shorter) + 2:
+                return True
+            return False
+        
+        def flush_buffer():
+            """Print the buffered line if there is one."""
+            nonlocal buffered_line
+            if buffered_line is not None:
+                print(buffered_line)
+                buffered_line = None
+        
         try:
             process = subprocess.Popen(
                 cmd,
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                bufsize=1024,
             )
+            
+            ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
+            
             while True:
-                out = process.stdout.readline().decode("utf-8")
-                ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
-                stdout = ansi_escape.sub("", out)
-                if process.poll() is not None:
+                out = process.stdout.readline()
+                if not out and process.poll() is not None:
                     break
                 if out:
-                    if not quiet:
-                        logger.info(stdout.replace("\n", "", 1))
-                        # time.sleep(0.01)
-                    if file is not None:
-                        logger_file.info(stdout.replace("\n", "", 1))
-        except Exception as e:
-            logger(f"Docker process stopped by user {e}")
-            process.stdin.write(b"\x03")  # Send the Ctrl+C signal to the Docker process
+                    try:
+                        line = out.decode("utf-8")
+                    except UnicodeDecodeError:
+                        line = out.decode("latin-1")
+                    
+                    # Strip ANSI codes for clean output
+                    clean_line = ansi_escape.sub("", line).rstrip()
+                    
+                    # Always log to file (full output)
+                    if log_file is not None and clean_line:
+                        log_file.write(clean_line + "\n")
+                        log_file.flush()
+                    
+                    # Only show to console if not quiet and not noise
+                    if not quiet and clean_line:
+                        is_noise = any(p.search(clean_line) for p in noise_patterns)
+                        
+                        if not is_noise:
+                            if is_progressive_duplicate(clean_line, buffered_line):
+                                # Progressive duplicate - keep the longer one
+                                if len(clean_line) > len(buffered_line or ""):
+                                    buffered_line = clean_line
+                                # else: current is shorter, keep buffered (it's longer)
+                            else:
+                                # Different line - flush buffer and start new
+                                flush_buffer()
+                                buffered_line = clean_line
+            
+            # Flush any remaining buffered line
+            flush_buffer()
+                            
+        except KeyboardInterrupt:
+            logger.warning("Process interrupted by user")
             process.terminate()
+        except Exception as e:
+            logger.error(f"Process error: {e}")
+            try:
+                process.terminate()
+            except:
+                pass
+        finally:
+            if log_file is not None:
+                log_file.close()
 
         return process.returncode
 
