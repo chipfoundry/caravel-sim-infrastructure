@@ -12,7 +12,7 @@ class SetupEnv(BaseClass):
 
     def clone_needed_repos(self):
         self.clone_repo(
-            repo_url="https://github.com/efabless/caravel.git",
+            repo_url="https://github.com/chipfoundry/caravel.git",
             target_dir=self.paths.caravel_root,
             depth=1,
             branch="main",
@@ -24,7 +24,7 @@ class SetupEnv(BaseClass):
             branch="cocotb-CI",
         )
         self.clone_repo(
-            repo_url="https://github.com/efabless/caravel_mgmt_soc_litex.git",
+            repo_url="https://github.com/chipfoundry/caravel_mgmt_soc_litex.git",
             target_dir=self.paths.mgmt_core_root,
             depth=1,
             branch="main",
@@ -32,7 +32,7 @@ class SetupEnv(BaseClass):
         self.download_sky130_pdk("a918dc7c8e474a99b68c85eb3546b4ed91fe9e7b")
 
     def pull_cocotb_docker(self):
-        image_name = "efabless/dv"
+        image_name = "docker.io/chipfoundry/dv"
         tag = "cocotb"
         docker_pull_command = f"docker pull {image_name}:{tag}"
         self.logger.info(

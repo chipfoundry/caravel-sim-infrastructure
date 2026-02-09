@@ -78,16 +78,37 @@ class Test:
             )  # using debug register in this test isn't needed
 
     def set_user_project(self):
-        if self.sim == "RTL":
-            user_include = f"{self.paths.USER_PROJECT_ROOT}/verilog/includes/includes.rtl.caravel_user_project"
+        # Determine project type
+        if self.args.openframe:
+            project = "openframe"
+        elif "CARAVEL_ROOT" in self.paths._fields:
+            project = "caravel"
+        elif "FRIGATE_ROOT" in self.paths._fields:
+            project = "frigate"
         else:
-            user_include = f"{self.paths.USER_PROJECT_ROOT}/verilog/includes/includes.gl.caravel_user_project"
+            project = None
+            
+        if self.sim == "RTL":
+            # For OpenFrame, try openframe-specific include first, fall back to caravel
+            if self.args.openframe:
+                user_include = f"{self.paths.USER_PROJECT_ROOT}/verilog/includes/includes.rtl.openframe_user_project"
+                if not os.path.exists(user_include):
+                    user_include = f"{self.paths.USER_PROJECT_ROOT}/verilog/includes/includes.rtl.caravel_user_project"
+            else:
+                user_include = f"{self.paths.USER_PROJECT_ROOT}/verilog/includes/includes.rtl.{project}_user_project"
+        else:
+            if self.args.openframe:
+                user_include = f"{self.paths.USER_PROJECT_ROOT}/verilog/includes/includes.gl.openframe_user_project"
+                if not os.path.exists(user_include):
+                    user_include = f"{self.paths.USER_PROJECT_ROOT}/verilog/includes/includes.gl.caravel_user_project"
+            else:
+                user_include = f"{self.paths.USER_PROJECT_ROOT}/verilog/includes/includes.gl.{project}_user_project"
         user_project = f" -f {user_include}"
         self.write_includes_file(user_include)
         return user_project.replace("\n", "")
 
     def start_of_test(self):
-        print(f"Start running test: {bcolors.OKBLUE  } {self.full_name} {bcolors.ENDC}")
+        # Note: Clean test header is now printed by test_run_function in RunRegression
         self.start_time_t = datetime.now()
         self.create_logs()
         self.create_module_trail()
@@ -95,7 +116,8 @@ class Test:
             with open(f"{self.compilation_dir}/pli.tab", "w") as file:
                 file.write("acc+=rw,wn:*")
         self.set_test_macros()
-        self.set_linker_script()
+        if not self.args.openframe:
+            self.set_linker_script()
         self.start_time = self.start_time_t.strftime("%H:%M:%S(%a)")
         self.status = "running"
 
@@ -110,20 +132,19 @@ class Test:
         Path(f"{self.test_dir}/{self.passed}").touch()
         if is_pass[1]:
             Test.passed_count += 1
-            print(
-                f"{bcolors.OKGREEN }Test: {self.sim}-{self.name} has passed{bcolors.ENDC}"
-            )
+            # Note: Clean result is printed by test_run_function in RunRegression
         else:
             Test.failed_count += 1
+            # Log error details to help user find the issue
             if not os.path.isfile(self.compilation_log):
                 pass
             elif os.path.isfile(self.test_log):
-                self.logger.info(
-                    f"{bcolors.FAIL }Fail{bcolors.ENDC}: Test {self.sim}-{self.name} has Failed for more info refer to {bcolors.OKCYAN }{self.test_log}{bcolors.ENDC}"
+                self.logger.error(
+                    f"Test {self.full_name} failed. See: {self.test_log}"
                 )
             else:
-                self.logger.info(
-                    f"{bcolors.FAIL }Error{bcolors.ENDC}: Fail to compile the verilog code for more info refer to {bcolors.OKCYAN }{self.compilation_log}{bcolors.ENDC}"
+                self.logger.error(
+                    f"Compilation failed. See: {self.compilation_log}"
                 )
 
         if self.args.lint:
@@ -211,10 +232,19 @@ class Test:
         rerun_script = rerun_script.replace("replace by test command", command).replace(
             "replace by cocotb path", self.paths.RUN_PATH
         )
-        rerun_script = rerun_script.replace("replace by mgmt Root", self.paths.MCW_ROOT)
-        rerun_script = rerun_script.replace(
-            "replace by caravel Root", self.paths.CARAVEL_ROOT
-        )
+        if "MCW_ROOT" in self.paths._fields:
+            rerun_script = rerun_script.replace("replace by mgmt Root", self.paths.MCW_ROOT)
+        else:
+            # OpenFrame mode - no MCW_ROOT
+            rerun_script = rerun_script.replace("replace by mgmt Root", "")
+        if "CARAVEL_ROOT" in self.paths._fields:
+            rerun_script = rerun_script.replace(
+                "replace by caravel Root", self.paths.CARAVEL_ROOT
+            )
+        elif "FRIGATE_ROOT" in self.paths._fields:
+            rerun_script = rerun_script.replace(
+                "replace by caravel Root", self.paths.FRIGATE_ROOT
+            )
         rerun_script = rerun_script.replace(
             "replace by orignal rerun script", f"{self.test_dir}/rerun.py"
         )
@@ -280,36 +310,60 @@ class Test:
         paths = self.convert_list_to_include(file)
         # write to include file in the top of the file
         self.includes_file = f"{self.compilation_dir}/includes.v"
-        if self.sim == "RTL":
+        self.sim_to_include = {
+            "RTL": "rtl",
+            "GL_SDF": "gl+sdf",
+            "GL": "gl",
+        }
+        
+        # Determine the includes file to use
+        if self.args.openframe:
+            # OpenFrame: use caravel openframe includes from CARAVEL_ROOT
+            openframe_include = f"{self.paths.CARAVEL_VERILOG_PATH}/includes/includes.{self.sim_to_include[self.sim]}.caravel_openframe"
+            if os.path.exists(openframe_include):
+                includes = self.convert_list_to_include(openframe_include)
+            else:
+                # No includes file - OpenFrame may use netlists.v approach
+                self.logger.info(f"Note: OpenFrame includes file not found: {openframe_include}")
+                includes = ""
+        elif "CARAVEL_ROOT" in self.paths._fields and "VERILOG_PATH" in self.paths._fields:
+            # Standard Caravel: include file from caravel mgmt
             includes = self.convert_list_to_include(
-                f"{self.paths.VERILOG_PATH}/includes/includes.rtl.caravel"
+                f"{self.paths.VERILOG_PATH}/includes/includes.{self.sim_to_include[self.sim]}.caravel"
             )
-        elif self.sim == "GL_SDF":
+        elif "FRIGATE_ROOT" in self.paths._fields:  # when caravel include file from frigate
             includes = self.convert_list_to_include(
-                f"{self.paths.VERILOG_PATH}/includes/includes.gl+sdf.caravel"
+                f"{self.paths.FRIGATE_ROOT}/verilog/includes/includes.{self.sim_to_include[self.sim]}.frigate"
             )
-        elif self.sim == "GL":
-            includes = self.convert_list_to_include(
-                f"{self.paths.VERILOG_PATH}/includes/includes.gl.caravel"
-            )
+        else:
+            includes = ""
+            
         includes = paths + includes
         open(self.includes_file, "w").write(includes)
         move_defines_to_start(self.includes_file, 'defines.v"')
         # copy includes used also
         paths = open(file, "r").read()
         self.includes_list = f"{self.compilation_dir}/includes"
-        if self.sim == "RTL":
+        
+        if self.args.openframe:
+            openframe_include = f"{self.paths.CARAVEL_VERILOG_PATH}/includes/includes.{self.sim_to_include[self.sim]}.caravel_openframe"
+            if os.path.exists(openframe_include):
+                includes = open(openframe_include, "r").read()
+            else:
+                includes = open(
+                    f"{self.paths.CARAVEL_VERILOG_PATH}/includes/includes.{self.sim_to_include[self.sim]}.caravel", "r"
+                ).read()
+        elif "CARAVEL_ROOT" in self.paths._fields and "VERILOG_PATH" in self.paths._fields:
             includes = open(
-                f"{self.paths.VERILOG_PATH}/includes/includes.rtl.caravel", "r"
+                f"{self.paths.VERILOG_PATH}/includes/includes.{self.sim_to_include[self.sim]}.caravel", "r"
             ).read()
-        elif self.sim == "GL_SDF":
+        elif "FRIGATE_ROOT" in self.paths._fields:  # when caravel include file from frigate
             includes = open(
-                f"{self.paths.VERILOG_PATH}/includes/includes.gl+sdf.caravel", "r"
+                f"{self.paths.FRIGATE_ROOT}/verilog/includes/includes.{self.sim_to_include[self.sim]}.frigate", "r"
             ).read()
-        elif self.sim == "GL":
-            includes = open(
-                f"{self.paths.VERILOG_PATH}/includes/includes.gl.caravel", "r"
-            ).read()
+        else:
+            includes = ""
+            
         includes = paths + includes
         open(self.includes_list, "w").write(includes)
         move_defines_to_start(self.includes_list, "defines.v")
@@ -323,8 +377,16 @@ class Test:
                 # Check if line is not empty or a comment
                 if line and not line.startswith("#"):
                     # Replace $(VERILOG_PATH) with actual path
-                    line = line.replace("$(VERILOG_PATH)", self.paths.VERILOG_PATH)
-                    line = line.replace("$(CARAVEL_PATH)", self.paths.CARAVEL_PATH)
+                    if "VERILOG_PATH" in self.paths._fields:
+                        line = line.replace("$(VERILOG_PATH)", self.paths.VERILOG_PATH)
+                    else:
+                        # OpenFrame mode - use CARAVEL_VERILOG_PATH as fallback
+                        line = line.replace("$(VERILOG_PATH)", self.paths.CARAVEL_VERILOG_PATH)
+                    if "CARAVEL_ROOT" in self.paths._fields:
+                        line = line.replace("$(CARAVEL_PATH)", self.paths.CARAVEL_PATH)
+                        line = line.replace("$(CARAVEL_VERILOG_PATH)", self.paths.CARAVEL_VERILOG_PATH)
+                    elif "FRIGATE_ROOT" in self.paths._fields:
+                        line = line.replace("$(FRIGATE_VERILOG)", f"{self.paths.FRIGATE_ROOT}/verilog")
                     line = line.replace(
                         "$(USER_PROJECT_VERILOG)",
                         f"{self.paths.USER_PROJECT_ROOT}/verilog",

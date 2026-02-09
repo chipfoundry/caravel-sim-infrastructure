@@ -23,6 +23,9 @@ from rich.table import Table
 from rich.console import Console
 import glob
 import subprocess
+from caravel_cocotb.scripts.verify_cocotb.logging_config import (
+    Colors, print_test_header, print_test_result, print_summary_table
+)
 
 class RunRegression:
     def __init__(self, args, paths, logger) -> None:
@@ -47,17 +50,29 @@ class RunRegression:
         paths_macros = [
             f'RUN_PATH=\\"{self.paths.RUN_PATH}\\"',
             f'TAG=\\"{self.args.tag}\\"',
-            f'CARAVEL_ROOT=\\"{self.paths.CARAVEL_ROOT}\\"',
-            f'MCW_ROOT=\\"{self.paths.MCW_ROOT}\\"',
             f'USER_PROJECT_ROOT=\\"{self.paths.USER_PROJECT_ROOT}\\"',
         ]
+        
+        # Add MCW_ROOT only for non-OpenFrame mode
+        if not self.args.openframe and "MCW_ROOT" in self.paths._fields:
+            paths_macros.append(f'MCW_ROOT=\\"{self.paths.MCW_ROOT}\\"')
+        
+        if "CARAVEL_ROOT" in self.paths._fields:
+            paths_macros += [f'CARAVEL_ROOT=\\"{self.paths.CARAVEL_ROOT}\\"']
+        elif "FRIGATE_ROOT" in self.paths._fields:
+            paths_macros += [f'FRIGATE_ROOT=\\"{self.paths.FRIGATE_ROOT}\\"']
 
         paths_macros.append(f'SIM_PATH=\\"{self.paths.SIM_PATH}/\\"')
         if self.args.pdk != "gf180":
             simulation_macros.append("FUNCTIONAL")
 
-        if self.args.caravan:
-            simulation_macros.append("CARAVAN")
+        # OpenFrame-specific macros
+        if self.args.openframe:
+            simulation_macros.append("OPENFRAME")
+        else:
+            if self.args.caravan:
+                simulation_macros.append("CARAVAN")
+                
         # don't dumb waves if tests are more than 10
         if not self.args.no_wave and len(self.tests) < 10:
             simulation_macros.append("WAVE_GEN")
@@ -72,9 +87,11 @@ class RunRegression:
 
         simulation_macros.append(self.args.pdk)
 
-        simulation_macros.extend([f"CPU_TYPE_{self.args.cpu_type}"])
-        if self.args.cpu_type == "ARM":
-            simulation_macros.append("AHB")
+        # CPU type macros only for non-OpenFrame mode
+        if not self.args.openframe and self.args.cpu_type is not None:
+            simulation_macros.extend([f"CPU_TYPE_{self.args.cpu_type}"])
+            if self.args.cpu_type == "ARM":
+                simulation_macros.append("AHB")
 
         self.args.macros += simulation_macros + paths_macros
 
@@ -192,8 +209,9 @@ class RunRegression:
                 self.run_all_tests()
         else:
             self.run_all_tests()
-            # Print the table in the top-left corner
-            Console().print(self.live_table(), justify="left")
+            # Print clean summary table
+            total_duration = '%.10s' % (datetime.now() - self.total_start_time)
+            print_summary_table(self.tests, total_duration)
 
         # for index, thread in enumerate(threads):
         #     thread.join()
@@ -236,6 +254,10 @@ class RunRegression:
                     TestDefaults(self.args, self.paths, self.test_run_function, self.tests, self.logger)
 
     def test_run_function(self, test):
+        # Print clean test header (except in quiet mode)
+        if self.args.verbosity != "quiet":
+            print_test_header(test.full_name, test.sim)
+        
         test.start_of_test()
         if not self.args.compile_only:
             self.update_run_log()
@@ -244,6 +266,15 @@ class RunRegression:
         if not self.args.compile_only:
             self.update_run_log()
             self.update_live_table()
+        
+        # Print clean test result (except in quiet mode)
+        if self.args.verbosity != "quiet" and not self.args.compile_only:
+            print_test_result(
+                test.full_name,
+                passed=(test.passed == "passed"),
+                duration=test.duration
+            )
+        
         if self.args.progress:
             self.logger.info(f"Total: {f'passed ({test.passed_count})':12} {f'failed ({test.failed_count})':12} {f'unknown ({test.unknown_count})':13} elapsed time ({('%.10s' % (datetime.now() - self.total_start_time))})")
 
@@ -326,22 +357,23 @@ class RunRegression:
     def write_git_log(self):
         file_name = f"{self.paths.SIM_PATH}/{self.args.tag}/repos_info.log"
         f = open(file_name, "w")
-        f.write(f"{'#'*4} Caravel repo info {'#'*4}\n")
-        url = "https://github.com/" + f"{run(f'cd {self.paths.CARAVEL_ROOT};git ls-remote --get-url', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout}".replace(
+        f.write(f"{'#'*4} {'Caravel' if 'CARAVEL_ROOT' in self.paths._fields else 'frigate' if 'FRIGATE_ROOT' in self.paths._fields else None} repo info {'#'*4}\n")
+        ROOT_REPO = self.paths.CARAVEL_ROOT if "CARAVEL_ROOT" in self.paths._fields else self.paths.FRIGATE_ROOT if "FRIGATE_ROOT" in self.paths._fields else None
+        url = "https://github.com/" + f"{run(f'cd {ROOT_REPO};git ls-remote --get-url', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout}".replace(
             "git@github.com:", ""
         ).replace(
             ".git", ""
         )
-        repo = f"Repo: {run(f'cd {self.paths.CARAVEL_ROOT};basename -s .git `git config --get remote.origin.url`', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout} ({url})".replace(
+        repo = f"Repo: {run(f'cd {ROOT_REPO};basename -s .git `git config --get remote.origin.url`', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout} ({url})".replace(
             "\n", " "
         )
         f.write(f"{repo}\n")
         f.write(
-            f"Branch name: {run(f'cd {self.paths.CARAVEL_ROOT};git symbolic-ref --short HEAD', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout}"
+            f"Branch name: {run(f'cd {ROOT_REPO};git symbolic-ref --short HEAD', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout}"
         )
         f.write(
             run(
-                f"cd {self.paths.CARAVEL_ROOT};git show --quiet HEAD",
+                f"cd {ROOT_REPO};git show --quiet HEAD",
                 stdout=PIPE,
                 stderr=PIPE,
                 universal_newlines=True,
@@ -349,28 +381,30 @@ class RunRegression:
             ).stdout
         )
 
-        f.write(f"\n\n{'#'*4} Caravel Managment repo info {'#'*4}\n")
-        url = "https://github.com/" + f"{run(f'cd {self.paths.MCW_ROOT};git ls-remote --get-url', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout}".replace(
-            "git@github.com:", ""
-        ).replace(
-            ".git", ""
-        )
-        repo = f"Repo: {run(f'cd {self.paths.MCW_ROOT};basename -s .git `git config --get remote.origin.url`', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout} ({url})".replace(
-            "\n", " "
-        )
-        f.write(f"{repo}\n")
-        f.write(
-            f"Branch name: {run(f'cd {self.paths.MCW_ROOT};git symbolic-ref --short HEAD', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout}"
-        )
-        f.write(
-            run(
-                f"cd {self.paths.MCW_ROOT};git show --quiet HEAD",
-                stdout=PIPE,
-                stderr=PIPE,
-                universal_newlines=True,
-                shell=True,
-            ).stdout
-        )
+        # Skip MCW_ROOT for OpenFrame mode
+        if not self.args.openframe and "MCW_ROOT" in self.paths._fields:
+            f.write(f"\n\n{'#'*4} Caravel Managment repo info {'#'*4}\n")
+            url = "https://github.com/" + f"{run(f'cd {self.paths.MCW_ROOT};git ls-remote --get-url', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout}".replace(
+                "git@github.com:", ""
+            ).replace(
+                ".git", ""
+            )
+            repo = f"Repo: {run(f'cd {self.paths.MCW_ROOT};basename -s .git `git config --get remote.origin.url`', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout} ({url})".replace(
+                "\n", " "
+            )
+            f.write(f"{repo}\n")
+            f.write(
+                f"Branch name: {run(f'cd {self.paths.MCW_ROOT};git symbolic-ref --short HEAD', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout}"
+            )
+            f.write(
+                run(
+                    f"cd {self.paths.MCW_ROOT};git show --quiet HEAD",
+                    stdout=PIPE,
+                    stderr=PIPE,
+                    universal_newlines=True,
+                    shell=True,
+                ).stdout
+            )
 
         f.write(f"\n\n{'#'*4} User repo info {'#'*4}\n")
         url = "https://github.com/" + f"{run(f'cd {self.paths.USER_PROJECT_ROOT};git ls-remote --get-url', stdout=PIPE, stderr=PIPE, universal_newlines=True, shell=True).stdout}".replace(
@@ -490,9 +524,8 @@ class RunRegression:
         elif self.args.sim != "GL_SDF":
             return
         # keep caravel sdf dir
-        sdf_dir = f"{self.paths.CARAVEL_ROOT}/signoff/{'caravan' if self.args.caravan else 'caravel'}/primetime/sdf"
         if self.args.sdfs_dir is None:
-            pass
+            sdf_dir = f"{self.paths.CARAVEL_ROOT}/signoff/{'caravan' if self.args.caravan else 'caravel'}/primetime/sdf"
         else:
             sdf_dir = self.args.sdfs_dir
         if isinstance(sdf_dir, list):
