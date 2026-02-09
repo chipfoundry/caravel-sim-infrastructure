@@ -1,12 +1,14 @@
 import cocotb
 import cocotb.log
 import caravel_cocotb.interfaces.caravel as caravel
+import caravel_cocotb.interfaces.openframe as openframe
 import logging
 from cocotb.log import SimTimeContextFilter
 from cocotb.log import SimLogFormatter
 from caravel_cocotb.interfaces.common_functions.Timeout import Timeout
 from cocotb.triggers import ClockCycles
 import oyaml as yaml
+from typing import Union
 
 try:
     from cocotb_coverage.coverage import coverage_db
@@ -19,7 +21,7 @@ except ImportError:
    configure the test timeout
    configure whitbox models
    start up the test connecting power vdd to the design then reset and disable the CSB bit
-   return the caravel environmnet with clock and start up
+   return the caravel or openframe environment with clock and start up
 """
 
 
@@ -35,10 +37,14 @@ def read_config_file():
         return configs
 
 
+def is_openframe_mode():
+    """Check if running in OpenFrame mode."""
+    return "OPENFRAME" in cocotb.plusargs
+
+
 CLOCK_GLOBAL = 25
 
 
-# async def test_configure(dut:cocotb.handle.SimHandle,timeout_cycles=1000000,clk=25,timeout_precision=0.2,num_error=3)-> caravel.Caravel_env:
 async def test_configure(
     dut: cocotb.handle.SimHandle,
     timeout_cycles=1000000,
@@ -46,9 +52,9 @@ async def test_configure(
     timeout_precision=0.2,
     num_error=int(read_config_file()["max_err"]),
     start_up=True,
-) -> caravel.Caravel_env:
+) -> Union[caravel.Caravel_env, openframe.OpenFrame_env]:
     """
-    Configure caravel power, clock, and reset and setup the timeout watchdog then return object of caravel environment.
+    Configure caravel/openframe power, clock, and reset and setup the timeout watchdog.
 
     :param SimHandle dut: dut handle
     :param int timeout_cycles: Number of cycles before reporting timeout and exit the test default = 1000000 cycles
@@ -56,8 +62,25 @@ async def test_configure(
     :param int timeout_precision: Precision of logging how many cycle left until the timeout default is 0.2 meaning if time is 100 cycle every 20 cycles there would be a warning message for timeout
     :param int num_error: Maximum number of errors reported before terminate the test
     :param bool start_up: start up the test connecting power and reset
-    :return: Object of type Caravel_env (caravel environment)
+    :return: Object of type Caravel_env or OpenFrame_env
     """
+    # For calculating recommended timeout
+    global CLOCK_GLOBAL
+    CLOCK_GLOBAL = clk
+
+    # Check if running in OpenFrame mode
+    if is_openframe_mode():
+        env = openframe.OpenFrame_env(dut)
+        Timeout(env.clk, timeout_cycles, timeout_precision)
+        cocotb.scheduler.add(max_num_error(num_error, env.clk))
+        env.setup_clock(clk)
+        if start_up:
+            await env.start_up()
+            await ClockCycles(env.clk, 10)
+        cocotb.log.info(" [test_configure] Running in OpenFrame mode")
+        return env
+    
+    # Standard Caravel mode
     caravelEnv = caravel.Caravel_env(dut)
     Timeout(caravelEnv.clk, timeout_cycles, timeout_precision)
     cocotb.scheduler.add(max_num_error(num_error, caravelEnv.clk))
@@ -77,10 +100,6 @@ async def test_configure(
         caravelEnv.active_gpios_num = (
             34  # with ARM the last 3 gpios are not configurable
         )
-
-    # For calculating recommended timeout
-    global CLOCK_GLOBAL
-    CLOCK_GLOBAL = clk
 
     return caravelEnv
 

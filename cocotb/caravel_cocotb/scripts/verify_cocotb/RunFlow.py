@@ -9,6 +9,7 @@ import re
 import logging
 import random
 from caravel_cocotb.scripts.verify_cocotb.DockerProcess import DockerProcess
+from caravel_cocotb.scripts.verify_cocotb.logging_config import setup_logger, Colors
 
 
 def check_valid_mail_addr(address):
@@ -28,25 +29,25 @@ class RunFLow:
         self.check_valid_args()
         design_info = self.get_design_info()
         self.set_paths(design_info)
-        self.set_cpu_type()
+        if not self.args.openframe:
+            self.set_cpu_type()
+        else:
+            self.args.cpu_type = None  # OpenFrame has no CPU
         self.set_tag()
         self.set_args(design_info)
         self.set_config_script(design_info)
-        DockerProcess(
-            "chipfoundry/dv:cocotb",
-            self.paths.USER_PROJECT_ROOT,
-            f"{self.paths.SIM_PATH}/{self.args.tag}",
-        ).run()
+        if not self.args.no_docker:
+            DockerProcess(
+                "chipfoundry/dv:cocotb",
+                self.paths.USER_PROJECT_ROOT,
+                f"{self.paths.SIM_PATH}/{self.args.tag}",
+            ).run()
         RunRegression(self.args, self.paths, self.logger)
 
     def configure_logger(self):
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
-        formatter = logging.Formatter("%(message)s")
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
+        """Configure logger with clean formatting based on verbosity level."""
+        verbosity = getattr(self.args, 'verbosity', 'normal') or 'normal'
+        self.logger = setup_logger(__name__, verbosity=verbosity)
 
     def check_valid_args(self):
         if all(v is None for v in [self.args.test, self.args.testlist]):
@@ -94,7 +95,6 @@ class RunFLow:
             if self.args.sim_path is None
             else f"{self.args.sim_path}/sim"
         )
-        VERILOG_PATH = f"{design_info['MCW_ROOT']}/verilog"
         if not os.path.exists(design_info["USER_PROJECT_ROOT"]):
             raise NotADirectoryError(
                 f"USER_PROJECT_ROOT is not a directory USER_PROJECT_ROOT:{design_info['USER_PROJECT_ROOT']}"
@@ -108,6 +108,35 @@ class RunFLow:
             raise NotADirectoryError(
                 f"PDK_ROOT/PDK is not a directory PDK_ROOT:{design_info['PDK_ROOT']}/{design_info['PDK']}"
             )
+
+        # OpenFrame mode: no MCW_ROOT needed
+        if self.args.openframe:
+            if "CARAVEL_ROOT" not in design_info or not os.path.exists(design_info["CARAVEL_ROOT"]):
+                raise NotADirectoryError(
+                    f"CARAVEL_ROOT is required for OpenFrame and must be a valid directory: {design_info.get('CARAVEL_ROOT', 'NOT SET')}"
+                )
+            if self.args.check_commits:
+                GitRepoChecker(design_info["CARAVEL_ROOT"])
+            Paths = namedtuple(
+                "Paths",
+                "CARAVEL_ROOT PDK_ROOT PDK CARAVEL_VERILOG_PATH CARAVEL_PATH RUN_PATH USER_PROJECT_ROOT SIM_PATH",
+            )
+            CARAVEL_VERILOG_PATH = f"{design_info['CARAVEL_ROOT']}/verilog"
+            CARAVEL_PATH = f"{CARAVEL_VERILOG_PATH}"
+            self.paths = Paths(
+                design_info["CARAVEL_ROOT"],
+                design_info["PDK_ROOT"],
+                design_info["PDK"],
+                CARAVEL_VERILOG_PATH,
+                CARAVEL_PATH,
+                RUN_PATH,
+                design_info["USER_PROJECT_ROOT"],
+                SIM_PATH,
+            )
+            return
+
+        # Standard Caravel mode with MCW_ROOT
+        VERILOG_PATH = f"{design_info['MCW_ROOT']}/verilog"
         if os.path.exists(f"{design_info['MCW_ROOT']}/verilog/dv/fw"):
             FIRMWARE_PATH = f"{design_info['MCW_ROOT']}/verilog/dv/fw"
         else:
@@ -234,7 +263,15 @@ class RunFLow:
         design_configs = dict(
             clock=self.args.clk, max_err=self.args.maxerr, PDK=self.args.pdk
         )
-        if "CARAVEL_ROOT" in self.paths._fields:
+        if self.args.openframe:
+            design_configs.update(
+                dict(
+                    CARAVEL_ROOT=self.paths.CARAVEL_ROOT,
+                    PDK_ROOT=f"{self.paths.PDK_ROOT}/{design_info['PDK']}",
+                    OPENFRAME=True,
+                )
+            )
+        elif "CARAVEL_ROOT" in self.paths._fields and "MCW_ROOT" in self.paths._fields:
             design_configs.update(
                 dict(
                     CARAVEL_ROOT=self.paths.CARAVEL_ROOT,
@@ -293,6 +330,7 @@ class CocotbArgs:
         compile_only=False,
         no_scratch=False,
         no_gen_defaults=False,
+        openframe=False,
     ) -> None:
         self.test = test
         self.sim = sim
@@ -325,6 +363,7 @@ class CocotbArgs:
         self.compile_only = compile_only
         self.no_scratch = no_scratch
         self.no_gen_defaults = no_gen_defaults
+        self.openframe = openframe
 
     def argparse_to_CocotbArgs(self, args):
         self.test = args.test
@@ -356,3 +395,4 @@ class CocotbArgs:
         self.compile_only = args.compile_only
         self.no_scratch = args.no_scratch
         self.no_gen_defaults = args.no_gen_defaults
+        self.openframe = args.openframe
